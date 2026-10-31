@@ -1,0 +1,19 @@
+# binaries
+run
+a.out
+*.o
+
+# models and tokenizers (download via `make download`)
+*.bin
+
+# crash dumps and profiling output
+core
+core.*
+perf.data
+perf.data.old
+*.dSYM/
+
+# editors
+.vscode/
+.idea/
+*.swp
