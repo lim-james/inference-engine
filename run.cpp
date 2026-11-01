@@ -3,7 +3,6 @@
 #include <string_view>
 #include <print>
 #include <utility>
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -692,7 +691,7 @@ int main(int argc, char **argv) {
 
     float temperature = 1.f;
     float topp = 0.9f;
-    std::optional<unsigned long long> rng_seed = 0;
+    unsigned long long rng_seed = 0;
     int steps = 256;
 
     std::string_view prompt{};
@@ -724,7 +723,7 @@ int main(int argc, char **argv) {
     if (steps == 0 || steps > transformer.config.seq_len) steps = transformer.config.seq_len;
 
     auto tokenizer = make_tokenizer(tokenizer_path, transformer.config.vocab_size);
-    auto sampler   = make_sampler(transformer.config.vocab_size, temperature, topp, *rng_seed);
+    auto sampler   = make_sampler(transformer.config.vocab_size, temperature, topp, rng_seed);
 
     generate(transformer, tokenizer, sampler, prompt, steps);
 
