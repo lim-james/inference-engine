@@ -1,5 +1,5 @@
 CXX      ?= g++
-SRC      ?= main.cpp
+SRC      ?= run.cpp
 BIN      ?= run
 STD      := -std=c++23
 WARN     := -Wall -Wextra
