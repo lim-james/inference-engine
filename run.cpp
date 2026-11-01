@@ -208,7 +208,7 @@ void read_checkpoint(std::string_view checkpoint, Config& config, TransformerWei
     if (fd == -1) { std::println(stderr, "open failed"); std::exit(EXIT_FAILURE); }
     float* mmap_data = static_cast<float*>(mmap(nullptr, file_size, PROT_READ, MAP_PRIVATE, fd, 0));
     if (mmap_data == MAP_FAILED) { std::println(stderr, "mmap failed"); std::exit(EXIT_FAILURE); }
-    data = std::span{mmap_data, static_cast<std::size_t>(file_size)};
+    data = std::span{mmap_data, static_cast<std::size_t>(file_size) / sizeof(float)};
 
     auto weights_ptr = data.subspan(sizeof(config) / sizeof(float));
     memory_map_weights(weights, config, weights_ptr, shared_weights);
@@ -300,7 +300,7 @@ view<float> forward(Transformer& transformer, int token, int pos) {
             float val = pos * freq;
             float fcr = std::cosf(val);
             float fci = std::sinf(val);
-            int rotn = 1 < kv_dim ? 2 : 1;
+            int rotn = i < kv_dim ? 2 : 1;
             for (int v = 0; v < rotn; ++v) {
                 view<float> vec = v == 0 ? s.q : s.k;
                 float v0 = vec[i];
@@ -557,7 +557,7 @@ int sample(Sampler& sampler, view<float> logits) {
 // ----------------------------------------------------------------------------
 // generation loop
 
-int str_lookup(std::string_view str, std::vector<TokenIndex>& sorted_vocab, int vocab_size) {
+int str_lookup(std::string_view str, std::vector<TokenIndex>& sorted_vocab) {
     auto it = std::ranges::lower_bound(sorted_vocab, TokenIndex{.str=str});
     return (it != sorted_vocab.end() && it->str == str) ? it->id : -1;
 }
@@ -580,7 +580,7 @@ void encode(Tokenizer& t, std::string_view text, int8_t bos, int8_t eos, view<in
     if (bos) tokens[n_tokens++] = 1;
 
     if (!text.empty()) {
-        tokens[n_tokens++] = str_lookup(" ", t.sorted_vocab, t.vocab_size);
+        tokens[n_tokens++] = str_lookup(" ", t.sorted_vocab);
     }
 
     for (const char *c = text.data(); *c != '\0'; c++) {
@@ -591,12 +591,12 @@ void encode(Tokenizer& t, std::string_view text, int8_t bos, int8_t eos, view<in
 
         if ((*(c+1) & 0xC0) == 0x80 && str_len < 4) continue;
 
-        int id = str_lookup(std::string_view{str_buffer.data(), str_len}, t.sorted_vocab, t.vocab_size);
+        int id = str_lookup(std::string_view{str_buffer.data(), str_len}, t.sorted_vocab);
 
         if (id != -1) {
             tokens[n_tokens++] = id;
         } else {
-            for (int i = 0; i < str_len; ++i) {
+            for (auto i{0ul}; i < str_len; ++i) {
                 tokens[n_tokens++] = static_cast<unsigned char>(str_buffer[i]) + 3;
             }
         }
@@ -610,7 +610,7 @@ void encode(Tokenizer& t, std::string_view text, int8_t bos, int8_t eos, view<in
 
         for (int i = 0; i < n_tokens - 1; ++i) {
             str_buffer = std::format("{}{}", t.vocab[tokens[i]], t.vocab[tokens[i+1]]);
-            int id = str_lookup(str_buffer, t.sorted_vocab, t.vocab_size);
+            int id = str_lookup(str_buffer, t.sorted_vocab);
             if (id != -1 && t.vocab_scores[id] > best_score) {
                 best_score = t.vocab_scores[id];
                 best_id = id;
