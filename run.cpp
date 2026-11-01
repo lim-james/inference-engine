@@ -3,6 +3,7 @@
 #include <string_view>
 #include <print>
 #include <utility>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -638,10 +639,13 @@ void generate(Transformer& transformer, Tokenizer& tokenizer, Sampler& sampler, 
         std::exit(EXIT_FAILURE);
     }
 
+    using clock = std::chrono::steady_clock;
+    std::optional<clock::time_point> start;
 
     int next;
     int token = prompt_tokens[0];
     int pos = 0;
+
     while (pos < steps) {
         view<float> logits = forward(transformer, token, pos);
 
@@ -658,8 +662,15 @@ void generate(Transformer& transformer, Tokenizer& tokenizer, Sampler& sampler, 
         safe_printf(piece);
         std::fflush(stdout);
         token = next;
+
+        if (!start) start = clock::now();
     }
     std::println();
+
+    if (start && pos > 1) {
+        std::chrono::duration<double> elapsed = clock::now() - *start;
+        std::println(stderr, "achieved tok/s: {:.2f}", (pos - 1) / elapsed.count());
+    }
 }
 
 void error_usage() {
