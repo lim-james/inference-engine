@@ -6,7 +6,9 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <ranges>
 
+#include <cassert>
 #include <cstring>
 #include <cstdio>
 #include <cmath>
@@ -45,6 +47,9 @@ public:
 
     constexpr pointer data() { return ptr_; }
     constexpr const_pointer data() const { return ptr_; }
+
+    constexpr std::span<value_type> first(std::size_t n) { return std::span{ptr_, n}; }
+    constexpr std::span<const value_type> first(std::size_t n) const { return std::span{ptr_, n}; }
 
     constexpr reference operator*() { return *ptr_; }
     constexpr const_reference operator*() const { return *ptr_; }
@@ -238,20 +243,16 @@ void rmsnorm(view<float> o, view<float> x, view<float> weight, int size) {
 }
 
 void softmax(view<float> x, int size) {
-    float max_val = x[0];
-    for (int i = 1; i < size; ++i) {
-        if (x[i] > max_val) {
-            max_val = x[i];
-        }
-    }
-    float sum = 0.0f;
-    for (int i = 0; i < size; ++i) {
-        x[i] = std::expf(x[i] - max_val);
-        sum += x[i];
-    }
-    for (int i = 0; i < size; ++i) {
-        x[i] /= sum;
-    }
+    assert(size > 0);
+    auto x_span = x.first(size);
+
+    const float max_val = *std::ranges::max_element(x_span);
+    auto shift_exp = [max_val](float& i) { i = std::expf(i - max_val); };
+    std::ranges::for_each(x_span, shift_exp);
+
+    const float sum = std::ranges::fold_left(x_span, 0.0f, std::plus{});
+    auto normalize = [sum](float& i) { i /= sum; };
+    std::ranges::for_each(x_span, normalize);
 }
 
 void matmul(view<float> xout, view<float> x, view<float> w, int n, int d) {
