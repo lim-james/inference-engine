@@ -230,9 +230,8 @@ void read_checkpoint(std::string_view checkpoint, Config& config, TransformerWei
 // neural net blocks; the dynamics of the Transformer
 
 void rmsnorm(view<float> o, view<float> x, view<float> weight, int size) {
-    float ss = 0.0f;
-    for (int j = 0; j < size; ++j)
-        ss += x[j] * x[j];
+    auto x_sq = x.first(size) | std::views::transform([](auto i) { return i*i; });
+    float ss = std::ranges::fold_left(x_sq, 0.0f, std::plus{});
 
     ss /= size;
     ss += 1e-5f;
