@@ -7,6 +7,11 @@
 #include <string>
 #include <vector>
 #include <ranges>
+#include <type_traits>
+#include <memory>
+#include <concepts>
+#include <span>
+#include <utility>
 
 #include <cassert>
 #include <cstring>
@@ -15,12 +20,31 @@
 
 #include <getopt.h> 
 #include <fcntl.h> 
+#include <unistd.h>
 #include <sys/mman.h> 
 
-#include <type_traits>
-#include <memory>
-#include <concepts>
-#include <span>
+class file_guard {
+public:
+    constexpr file_guard(int fd): fd_{fd} {}
+    constexpr ~file_guard() { if (fd_ >= 0) close(fd_); }
+
+    file_guard(const file_guard&) = delete;
+    void operator=(const file_guard&) = delete;
+
+    constexpr file_guard(file_guard&& other) noexcept : fd_{std::exchange(other.fd_, 0)} {}
+    constexpr file_guard& operator=(file_guard&& other) noexcept {
+        if (this != &other) file_guard{std::move(other)}.swap(*this);
+        return *this;
+    }
+
+    constexpr void swap(file_guard& other) noexcept { std::swap(fd_, other.fd_); }
+
+    constexpr explicit operator bool() noexcept { return fd_ >= 0; }
+    constexpr operator int() noexcept { return fd_ >= 0; }
+
+private:
+    int fd_;
+};
 
 template<typename U, typename T>
 concept HasPointerGetter = requires (U u) { {u.get()} -> std::same_as<T*>; };
@@ -137,7 +161,6 @@ struct Transformer {
     TransformerWeights weights; // the weights of the model
     RunState state; // buffers for the "wave" of activations in the forward pass
     // some more state needed to properly clean up the memory mapping (sigh)
-    int fd; // file descriptor for memory mapping
     std::span<float> data; // memory mapped data pointer
     ssize_t file_size; // size of the checkpoint file in bytes
 };
@@ -157,8 +180,8 @@ void malloc_run_state(RunState& state, const Config& p) {
         .value_cache = std::make_unique<float[]>(p.n_layers * p.seq_len * kv_dim),
     };
     // ensure all mallocs went fine
-    if (!s.x || !s.xb || !s.xb2 || !s.hb || !s.hb2 || !s.q
-     || !s.key_cache || !s.value_cache || !s.att || !s.logits) {
+    if (!s.x || !s.xb || !s.xb2 || !s.hb || !s.hb2 || !s.q || 
+        !s.key_cache || !s.value_cache || !s.att || !s.logits) {
         std::println(stderr, "malloc failed!");
         std::exit(EXIT_FAILURE);
     }
@@ -196,8 +219,7 @@ void memory_map_weights(TransformerWeights& w, Config& p, std::span<float> ptr, 
     w.wcls = shared_weights ? w.token_embedding_table : ptr;
 }
 
-void read_checkpoint(std::string_view checkpoint, Config& config, TransformerWeights& weights,
-                     int& fd, std::span<float>& data, ssize_t& file_size) {
+void read_checkpoint(std::string_view checkpoint, Config& config, TransformerWeights& weights, std::span<float>& data, ssize_t& file_size) {
     FILE *file = std::fopen(checkpoint.data(), "rb");
     if (!file) { std::println(stderr, "Couldn't open file {}", checkpoint); std::exit(EXIT_FAILURE); }
     if (std::fread(&config, sizeof(config), 1, file) != 1) std::exit(EXIT_FAILURE);
@@ -209,8 +231,8 @@ void read_checkpoint(std::string_view checkpoint, Config& config, TransformerWei
     file_size = std::ftell(file);
     std::fclose(file);
 
-    fd = open(checkpoint.data(), O_RDONLY);
-    if (fd == -1) { std::println(stderr, "open failed"); std::exit(EXIT_FAILURE); }
+    auto fd = file_guard{open(checkpoint.data(), O_RDONLY)};
+    if (!fd) { std::println(stderr, "open failed"); std::exit(EXIT_FAILURE); }
     float* mmap_data = static_cast<float*>(mmap(nullptr, file_size, PROT_READ, MAP_PRIVATE, fd, 0));
     if (mmap_data == MAP_FAILED) { std::println(stderr, "mmap failed"); std::exit(EXIT_FAILURE); }
     data = std::span{mmap_data, static_cast<std::size_t>(file_size) / sizeof(float)};
@@ -221,7 +243,7 @@ void read_checkpoint(std::string_view checkpoint, Config& config, TransformerWei
 
 [[nodiscard]] Transformer make_transformer(std::string_view checkpoint_path) {
     Transformer t{};
-    read_checkpoint(checkpoint_path, t.config, t.weights, t.fd, t.data, t.file_size);
+    read_checkpoint(checkpoint_path, t.config, t.weights, t.data, t.file_size);
     malloc_run_state(t.state, t.config);
     return t;
 }
