@@ -40,7 +40,7 @@ public:
     constexpr void swap(file_guard& other) noexcept { std::swap(fd_, other.fd_); }
 
     constexpr explicit operator bool() noexcept { return fd_ >= 0; }
-    constexpr operator int() noexcept { return fd_ >= 0; }
+    constexpr operator int() noexcept { return fd_; }
 
 private:
     int fd_;
