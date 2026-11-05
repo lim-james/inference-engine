@@ -351,7 +351,7 @@ view<float> forward(Transformer& transformer, int token, int pos) {
 
             view<float> xb = s.xb.get() + h * head_size;
             std::memset(xb, 0, head_size * sizeof(float));
-            for (int t = 0; t <= pos; t++) {
+            for (int t = 0; t <= pos; ++t) {
                 view<float> v = s.value_cache.get() + loff + t * kv_dim + (h / kv_mul) * head_size;
                 float a = att[t];
                 for (int i = 0; i < head_size; ++i) {
@@ -486,15 +486,8 @@ struct Sampler {
 }
 
 int sample_argmax(view<float> probabilities, int n) {
-    int max_i = 0;
-    float max_p = probabilities[0];
-    for (int i = 1; i < n; ++i) {
-        if (probabilities[i] > max_p) {
-            max_i = i;
-            max_p = probabilities[i];
-        }
-    }
-    return max_i;
+    auto prob_span = probabilities.first(n);
+    return std::distance(prob_span.begin(), std::ranges::max_element(prob_span));
 }
 
 int sample_mult(view<float> probabilities, int n, float coin) {
