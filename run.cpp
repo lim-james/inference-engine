@@ -165,6 +165,12 @@ struct Transformer {
     ssize_t file_size; // size of the checkpoint file in bytes
 };
 
+template<typename... Args>
+inline void handle_error(std::format_string<Args...> fmt, Args&&... args) {
+    std::println(stderr, fmt, std::forward<Args>(args)...);
+    std::exit(EXIT_FAILURE);
+}
+
 void malloc_run_state(RunState& state, const Config& p) {
     const int kv_dim = (p.dim * p.n_kv_heads) / p.n_heads;
     RunState s{
@@ -181,10 +187,8 @@ void malloc_run_state(RunState& state, const Config& p) {
     };
     // ensure all mallocs went fine
     if (!s.x || !s.xb || !s.xb2 || !s.hb || !s.hb2 || !s.q || 
-        !s.key_cache || !s.value_cache || !s.att || !s.logits) {
-        std::println(stderr, "malloc failed!");
-        std::exit(EXIT_FAILURE);
-    }
+        !s.key_cache || !s.value_cache || !s.att || !s.logits)
+        handle_error("malloc failed!");
     state = std::move(s);
 }
 
@@ -221,7 +225,7 @@ void memory_map_weights(TransformerWeights& w, Config& p, std::span<float> ptr, 
 
 void read_checkpoint(std::string_view checkpoint, Config& config, TransformerWeights& weights, std::span<float>& data, ssize_t& file_size) {
     FILE *file = std::fopen(checkpoint.data(), "rb");
-    if (!file) { std::println(stderr, "Couldn't open file {}", checkpoint); std::exit(EXIT_FAILURE); }
+    if (!file) handle_error("Couldn't open file {}", checkpoint);
     if (std::fread(&config, sizeof(config), 1, file) != 1) std::exit(EXIT_FAILURE);
 
     int shared_weights = config.vocab_size > 0 ? 1 : 0;
@@ -232,9 +236,9 @@ void read_checkpoint(std::string_view checkpoint, Config& config, TransformerWei
     std::fclose(file);
 
     auto fd = file_guard{open(checkpoint.data(), O_RDONLY)};
-    if (!fd) { std::println(stderr, "open failed"); std::exit(EXIT_FAILURE); }
+    if (!fd) handle_error("open failed");
     float* mmap_data = static_cast<float*>(mmap(nullptr, file_size, PROT_READ, MAP_PRIVATE, fd, 0));
-    if (mmap_data == MAP_FAILED) { std::println(stderr, "mmap failed"); std::exit(EXIT_FAILURE); }
+    if (mmap_data == MAP_FAILED) handle_error("mmap failed");
     data = std::span{mmap_data, static_cast<std::size_t>(file_size) / sizeof(float)};
 
     auto weights_ptr = data.subspan(sizeof(config) / sizeof(float));
@@ -283,7 +287,7 @@ void matmul(view<float> xout, view<float> x, view<float> w, int n, int d) {
     #pragma omp parallel for private(i)
     for (i = 0; i < d; ++i) {
         float val = 0.0f;
-        for (int j = 0; j < n; j++) {
+        for (int j = 0; j < n; ++j) {
             val += w[i * n + j] * x[j];
         }
         xout[i] = val;
@@ -421,15 +425,15 @@ struct Tokenizer {
     }
     
     FILE* file = std::fopen(tokenizer_path.data(), "rb");
-    if (!file) { std::println(stderr, "Couldn't open file {}", tokenizer_path); std::exit(EXIT_FAILURE); }
-    if (std::fread(&t.max_token_length, sizeof(int), 1, file) != 1) { std::println(stderr, "failed read"); std::exit(EXIT_FAILURE); }
+    if (!file) handle_error("Couldn't open file {}", tokenizer_path);
+    if (std::fread(&t.max_token_length, sizeof(int), 1, file) != 1) handle_error("failed read");
 
     int len;
     for (int i = 0; i < vocab_size; ++i) {
-        if (std::fread(&t.vocab_scores[i], sizeof(float), 1, file) != 1) { std::println(stderr, "failed read"); std::exit(EXIT_FAILURE); }
-        if (std::fread(&len, sizeof(int), 1, file) != 1) { std::println(stderr, "failed read"); std::exit(EXIT_FAILURE); }
+        if (std::fread(&t.vocab_scores[i], sizeof(float), 1, file) != 1) handle_error("failed read");
+        if (std::fread(&len, sizeof(int), 1, file) != 1) handle_error("failed read");
         t.vocab[i].resize(len);
-        if (std::fread(t.vocab[i].data(), len, 1, file) != 1) { std::println(stderr, "failed read"); std::exit(EXIT_FAILURE); }
+        if (std::fread(t.vocab[i].data(), len, 1, file) != 1) handle_error("failed read");
     }
 
     fclose(file);
@@ -494,9 +498,7 @@ int sample_mult(view<float> probabilities, int n, float coin) {
     float cdf = 0.0f;
     for (int i = 0; i < n; ++i) {
         cdf += probabilities[i];
-        if (coin < cdf) {
-            return i;
-        }
+        if (coin < cdf) return i;
     }
     return n - 1;
 }
@@ -508,7 +510,7 @@ int sample_topp(view<float> probabilities, int n, float topp, view<ProbIndex> pr
         if (probabilities[i] >= cutoff) {
             probindex[n0].index = i;
             probindex[n0].prob = probabilities[i];
-            n0++;
+            ++n0;
         }
     }
 
@@ -649,10 +651,7 @@ void generate(Transformer& transformer, Tokenizer& tokenizer, Sampler& sampler, 
     int num_prompt_tokens = 0;
     auto prompt_tokens = std::make_unique<int[]>(prompt.length() + 3); // +3 for '\0', ?BOS, ?EOS
     encode(tokenizer, prompt, 1, 0, prompt_tokens, num_prompt_tokens); 
-    if (num_prompt_tokens < 1) {
-        std::println(stderr, "something is wrong, expected at least 1 prompt token");
-        std::exit(EXIT_FAILURE);
-    }
+    if (num_prompt_tokens < 1) handle_error("something is wrong, expected at least 1 prompt token");
 
     using clock = std::chrono::steady_clock;
     std::optional<clock::time_point> start;
